@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>林業GIS Pro - 実務完全版</title>
+    
+    <!-- OpenLayers 4.6.5 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/openlayers@4.6.5/dist/ol.css">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* ==========================================
+           基本設定
+           ========================================== */
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: "Meiryo", sans-serif; overflow: hidden; background: #f0f0f0; }
+        
+        /* レイアウト構造 */
+        #container { display: flex; height: 100vh; position: relative; }
+        
+        #sidebar {
+            width: 300px; background: #fff; border-right: 1px solid #ccc;
+            display: flex; flex-direction: column; z-index: 2; box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+        .sidebar-header { padding: 12px; background: #2c3e50; color: white; }
+        .sidebar-header h2 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+        .sidebar-content { flex-grow: 1; overflow-y: auto; padding: 8px; }
+        
+        /* ステータスバーの調整 */
+        #status-bar { 
+            padding: 5px 10px; 
+            background: #eee; 
+            font-size: 11px; 
+            border-top: 1px solid #ccc; 
+            color: #333; 
+            display: flex; 
+            justify-content: space-between;
+            align-items: center;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+        #status-msg, #edit-status {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 50%;
+        }
+
+        #map { flex-grow: 1; height: 100%; position: relative; cursor: default; overflow: hidden; }
+        #map.drawing { cursor: crosshair; }
+
+        /* パネル */
+        .panel { background: #fff; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; overflow: hidden; }
+        .panel-header { 
+            background: #f8f9fa; padding: 8px 10px; border-bottom: 1px solid #eee; 
+            font-weight: bold; font-size: 12px; color: #555; 
+            display: flex; justify-content: space-between; align-items: center; 
+            cursor: pointer; user-select: none;
+        }
+        .panel-header:hover { background: #f0f0f0; }
+        .panel-body { padding: 8px; transition: max-height 0.3s ease-out; overflow: hidden; }
+        .panel.closed .panel-body { display: none; }
+        .panel.closed .panel-header { border-bottom: none; }
+        .toggle-icon { transition: transform 0.3s; color: #999; font-size: 12px; margin-left: 10px; }
+        .panel.closed .toggle-icon { transform: rotate(-90deg); }
+
+        /* レイヤーリスト */
+        #layer-list { list-style: none; padding: 0; margin: 0; max-height: 250px; overflow-y: auto; }
+        .layer-item { padding: 8px; border-bottom: 1px solid #eee; background: #fff; transition: 0.2s; border-left: 3px solid transparent; }
+        .layer-item:hover { background: #f9f9f9; }
+        .layer-item.active-layer { background: #e8f5e9; border-left-color: #27ae60; }
+        .layer-item.editing-mode { background: #fff3e0; border-left-color: #e67e22; border: 2px solid #e67e22; }
+        
+        .layer-row-main { display: flex; align-items: center; }
+        .layer-name { flex-grow: 1; font-size: 12px; margin-left: 4px; cursor: pointer; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 24px; color: #2c3e50; }
+        
+        .btn-icon { border: none; background: none; cursor: pointer; color: #95a5a6; font-size: 12px; width: 24px; height: 24px; padding: 0; margin-left: 0; display: flex; align-items: center; justify-content: center; border-radius: 3px; }
+        .btn-icon:hover { color: #333; background: #eee; }
+        .btn-icon.focus-btn:hover { color: #27ae60; }
+        .btn-icon.edit-btn { color: #e67e22; }
+        .btn-icon.edit-btn.active { color: #fff; background: #e67e22; }
+        .btn-icon.prop-btn { color: #34495e; }
+        .btn-icon.prop-btn:hover { color: #2c3e50; background: #dce4ec; }
+        .btn-icon.table-btn { color: #3498db; }
+        .btn-icon.table-btn:hover { color: #2980b9; background: #ebf5fb; }
+        .btn-icon.delete:hover { color: #c0392b; background: #ffebee; }
+        
+        /* 無効状態のボタン */
+        .btn-icon.disabled { color: #e0e0e0; cursor: default; }
+        .btn-icon.disabled:hover { background: none; color: #e0e0e0; }
+
+        /* フォーム */
+        button { width: 100%; padding: 6px; margin-bottom: 5px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 11px; }
+        button.primary { background-color: #27ae60; color: white; border: none; font-weight: bold; }
+        button.primary:hover { background-color: #219150; }
+        button.warning { background-color: #f39c12; color: white; border: none; }
+        button.sync-btn { background-color: #34495e; color: white; border: none; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 5px; }
+        button.secondary { background-color: #3498db; color: white; border: none; }
+        button.earth-btn { background-color: #4285F4; color: white; border: none; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 5px; }
+
+        select, input[type="text"], input[type="number"] { width: 100%; padding: 5px; margin-bottom: 5px; border: 1px solid #ccc; border-radius: 3px; font-size: 11px; box-sizing: border-box; }
+
+        /* 作図ボタン */
+        .draw-buttons { display: flex; gap: 5px; justify-content: center; }
+        .draw-btn {
+            width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+            border: 1px solid #ccc; background: #fff; border-radius: 50%; 
+            cursor: pointer; font-size: 14px; color: #555; transition: 0.2s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .draw-btn.active { background: #27ae60; color: white; border-color: #27ae60; box-shadow: inset 0 2px 5px rgba(0,0,0,0.2); }
+        .draw-btn.stop-btn { color: #c0392b; border-color: #e74c3c; }
+
+        /* コンテキストメニュー */
+        .context-menu {
+            display: none; position: absolute; z-index: 5000;
+            background: #fff; border: 1px solid #ccc; border-radius: 4px;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.2); width: 150px;
+        }
+        .context-menu ul { list-style: none; padding: 0; margin: 0; }
+        .context-menu li { padding: 8px 15px; cursor: pointer; font-size: 12px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 8px; }
+        .context-menu li:last-child { border-bottom: none; }
+        .context-menu li:hover { background-color: #f5f5f5; }
+        .context-menu li.disabled { color: #ccc; cursor: default; }
+
+        /* 地図コントロール */
+        .map-switcher { position: absolute; top: 10px; right: 10px; z-index: 100; background: rgba(255,255,255,0.9); padding: 5px; border-radius: 4px; border: 1px solid #ccc; display: flex; gap: 5px; }
+        .map-btn { padding: 5px 10px; font-size: 11px; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; background: #fff; transition: 0.2s; }
+        .map-btn.active { background: #2c3e50; color: white; border-color: #2c3e50; }
+
+        .scale-container {
+            position: absolute; bottom: 25px; left: 10px; z-index: 100;
+            background: rgba(255,255,255,0.9); padding: 4px 8px;
+            border-radius: 3px; border: 1px solid #ccc;
+            font-size: 14px; font-weight: bold; color: #333;
+            font-family: Consolas, monospace; display: flex; align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #scale-input {
+            border: none; background: transparent; font-family: inherit; font-size: inherit; font-weight: inherit;
+            width: 70px; text-align: left; outline: none; border-bottom: 1px dashed #999; margin: 0 0 0 5px; padding: 0; color: #333;
+        }
+        #scale-input:focus { border-bottom: 1px solid #27ae60; background: #fff; }
+        #scale-input[type=number] { -moz-appearance: textfield; }
+
+        /* モーダル共通 */
+        #qr-modal-overlay, #export-modal-overlay, #join-modal-overlay, #property-modal-overlay, #pdf-preview-modal-overlay, #table-modal-overlay { 
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 3000; justify-content: center; align-items: center; 
+        }
+        #qr-modal, #export-modal, #join-modal, #property-modal { 
+            background: #fff; width: 600px; max-height: 80%; border-radius: 5px; padding: 20px; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(0,0,0,0.3); overflow-y: auto;
+        }
+        #qr-modal { text-align: center; width: auto; max-width: 90%; }
+        #table-modal {
+            background: #fff; width: 80%; height: 80%; border-radius: 5px; padding: 20px;
+            display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(0,0,0,0.3);
+        }
+
+        .prop-section-title { font-size: 12px; font-weight: bold; color: #2c3e50; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 2px; }
+        .style-row { display: flex; align-items: center; margin-bottom: 10px; font-size: 12px; flex-wrap: nowrap; flex-shrink: 0; }
+        .style-label { width: 120px; font-weight: bold; color: #555; flex-shrink: 0; }
+        .style-input { flex: 1; min-width: 0; }
+        
+        .color-list { 
+            max-height: 200px; min-height: 120px; overflow-y: auto; 
+            border: 1px solid #eee; padding: 5px; margin-top: 5px; 
+            flex-shrink: 0; background: #fafafa;
+        }
+        .color-item { display: flex; align-items: center; margin-bottom: 5px; gap: 10px; font-size: 12px; }
+        .color-item input[type="color"] { width: 30px; height: 25px; padding: 0; border: none; cursor: pointer; flex-shrink: 0; }
+        
+        #qrcode { margin: 20px auto; padding: 10px; background: white; display: inline-block; min-height: 256px; }
+        
+        /* QR分割ナビゲーション */
+        #qr-nav { display: none; justify-content: center; align-items: center; gap: 15px; margin-top: 10px; }
+        .qr-nav-btn { width: 40px; height: 40px; font-size: 18px; border-radius: 50%; border: 1px solid #ccc; background: #f9f9f9; cursor: pointer; }
+        .qr-nav-btn:hover { background: #eee; }
+        .qr-nav-btn:disabled { color: #ccc; cursor: default; }
+        #qr-counter { font-weight: bold; font-size: 16px; color: #333; }
+
+        .export-section { margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
+        .export-section:last-child { border-bottom: none; margin-bottom: 0; }
+        .export-title { font-weight: bold; font-size: 13px; color: #555; margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
+        .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        
+        .radio-group { display: flex; gap: 15px; align-items: center; font-size: 12px; }
+        .radio-group label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+
+        .guide-text { font-size: 12px; color: #666; margin-bottom: 15px; background: #f9f9f9; padding: 10px; border-radius: 4px; line-height: 1.4; border: 1px solid #eee; }
+        .join-step { margin-bottom: 15px; border: 1px solid #e0e0e0; padding: 10px; border-radius: 5px; background: #fff; }
+        .match-container { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .match-box { flex: 1; text-align: center; font-size: 11px; color: #555; }
+        .match-box select { width: 100%; margin-top: 5px; border: 2px solid #ddd; padding: 5px; font-weight: bold; color: #333; }
+        .match-icon { color: #27ae60; font-size: 16px; }
+
+        #pdf-preview-modal { background: #fff; width: 90%; height: 90%; border-radius: 5px; padding: 20px; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        #pdf-preview-container { flex: 1; overflow: auto; background: #555; display: flex; justify-content: center; align-items: center; border: 1px solid #ccc; margin-bottom: 15px; }
+        #pdf-preview-img { max-width: 100%; max-height: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.5); background: white; }
+
+        #table-container { flex: 1; overflow: auto; border: 1px solid #ccc; margin-top: 10px; }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+        .data-table th, .data-table td { border: 1px solid #ddd; padding: 6px; }
+        .data-table th { background: #f2f2f2; position: sticky; top: 0; z-index: 1; text-align: left; border-top: none; }
+        .data-table tr:hover { background-color: #f1f1f1; }
+
+        /* 属性パネル (改善版) */
+        #attribute-panel {
+            position: absolute; bottom: -50%; left: 0; width: 100%; 
+            height: 25%; /* デフォルトの高さを低く設定 */
+            background: #fff; 
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+            transition: bottom 0.3s ease-out, height 0.3s ease-out; /* 高さのアニメーション追加 */
+            z-index: 2000;
+            display: flex; flex-direction: column;
+        }
+        #attribute-panel.open { bottom: 0; }
+        #attribute-panel.expanded { height: 50%; } /* 展開時の高さ */
+
+        .attr-header { padding: 10px 15px; background: #2c3e50; display: flex; justify-content: space-between; align-items: center; font-weight: bold; color: #fff; font-size: 13px; flex-shrink: 0; }
+        .attr-content { flex: 1; overflow-y: auto; padding: 0; }
+        .attr-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .attr-table th { width: 35%; text-align: left; background: #f8f9fa; padding: 5px 10px; border-bottom: 1px solid #ccc; border-right: 1px solid #ccc; position: sticky; top: 0; color: #333; font-weight: 600; }
+        .attr-table td { padding: 4px 10px; border-bottom: 1px solid #ccc; }
+        .attr-table tr:nth-child(even) { background: #fcfcfc; }
+        .attr-table input { width: 100%; padding: 2px 5px; box-sizing: border-box; border: 1px solid transparent; border-radius: 2px; font-family: inherit; font-size: 12px; background: transparent; }
+        .attr-table input:focus { border: 1px solid #27ae60; outline: none; background: #fff; }
+        .attr-footer { padding: 8px 15px; border-top: 1px solid #ddd; text-align: right; background: #fff; flex-shrink: 0; }
+        
+        .panel-ctrl-btn { background: none; border: none; font-size: 14px; cursor: pointer; color: rgba(255,255,255,0.7); padding: 5px; width: auto; transition: color 0.2s; margin-left: 5px; }
+        .panel-ctrl-btn:hover { color: #fff; }
+
+        /* 全画面ドロップ */
+        #global-drop-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(44, 62, 80, 0.85); z-index: 9999;
+            color: white; justify-content: center; align-items: center; flex-direction: column;
+            border: 8px dashed rgba(255,255,255,0.5); box-sizing: border-box; backdrop-filter: blur(2px);
+        }
+        #global-drop-overlay.active { display: flex; }
+        #global-drop-overlay i { font-size: 80px; margin-bottom: 20px; color: #3498db; }
+        #global-drop-overlay div.main-text { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+        #global-drop-overlay div.sub-text { font-size: 16px; opacity: 0.8; }
+    </style>
+</head>
+<body>
+
+<div id="container">
+    <div id="sidebar">
+        <div class="sidebar-header">
+            <h2><i class="fas fa-tree"></i> 林業GIS Pro</h2>
+        </div>
+        <div class="sidebar-content">
+            <!-- 1. レイヤー管理 -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel(this)">
+                    <span><i class="fas fa-layer-group"></i> レイヤー管理</span>
+                    <div style="display:flex; gap:5px; align-items:center;">
+                        <button class="btn-icon" onclick="event.stopPropagation(); createNewEmptyLayer()" title="新規レイヤー作成"><i class="fas fa-plus"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); mergeVisibleLayers()" title="表示結合"><i class="fas fa-object-group"></i></button>
+                        <button class="btn-icon" onclick="event.stopPropagation(); openExportModal()" title="出力ウィンドウを開く" style="color:#2c3e50;"><i class="fas fa-save"></i></button>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </div>
+                </div>
+                <div class="panel-body" style="padding:0;">
+                    <ul id="layer-list">
+                        <li style="padding:15px; text-align:center; color:#999; font-size:12px;">データなし</li>
+                    </ul>
+                </div>
+                <div style="padding:5px 10px; font-size:10px; color:#666; background:#f9f9f9; border-top:1px solid #eee;">
+                    <i class="fas fa-pen"></i> で編集モードON/OFF<br>
+                    編集モード中は地図右クリックで操作可能
+                </div>
+            </div>
+
+            <!-- 2. 作図 -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel(this)">
+                    <span><i class="fas fa-pen-nib"></i> 作図 (書き込み)</span>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="panel-body">
+                    <div class="draw-buttons">
+                        <div class="draw-btn" id="btn-draw-poly" onclick="toggleDraw('Polygon')" title="ポリゴンを描画">
+                            <i class="fas fa-draw-polygon"></i>
+                        </div>
+                        <div class="draw-btn" id="btn-draw-line" onclick="toggleDraw('LineString')" title="ラインを描画">
+                            <i class="fas fa-route"></i>
+                        </div>
+                        <div class="draw-btn stop-btn" onclick="toggleDraw(null)" title="描画終了 (選択モード)">
+                            <i class="fas fa-ban"></i>
+                        </div>
+                    </div>
+                    <div style="font-size:10px; color:#666; margin-top:5px; text-align:center;">
+                        ※編集モード中のレイヤーに追記
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. ポリゴン選択 & モバイル同期 (統合) -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel(this)">
+                    <span><i class="fas fa-filter"></i> ポリゴン選択・同期</span>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="panel-body">
+                    <!-- 検索セクション -->
+                    <div style="margin-bottom: 12px;">
+                        <div style="font-size:11px; font-weight:bold; color:#555; margin-bottom:4px;"><i class="fas fa-search"></i> 条件検索</div>
+                        <select id="filter-attr" onchange="document.getElementById('filter-val').value=''; updateFilterCandidates()"><option value="">(属性を選択)</option></select>
+                        <div style="display:flex; gap:5px; margin-bottom:5px;">
+                            <select id="filter-op" style="width:40%;">
+                                <option value="eq">＝</option><option value="contains">含む</option>
+                                <option value="gt">＞</option><option value="lt">＜</option>
+                            </select>
+                            <input type="text" id="filter-val" placeholder="値" style="width:60%;" list="filter-values">
+                            <datalist id="filter-values"></datalist>
+                        </div>
+                        <div style="display:flex; gap:5px;">
+                            <button class="warning" onclick="applyFilter(false)">選択 (ハイライト)</button>
+                            <button class="primary" onclick="applyFilter(true)">抽出 (新規レイヤー)</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 区切り線 -->
+                    <div style="border-top: 1px dashed #ccc; margin: 5px 0 10px 0;"></div>
+
+                    <!-- 同期セクション -->
+                    <div>
+                        <div style="font-size:11px; font-weight:bold; color:#555; margin-bottom:4px;"><i class="fas fa-mobile-alt"></i> モバイル転送</div>
+                        <button class="sync-btn" onclick="generateQR()">
+                            <i class="fas fa-qrcode"></i> 選択地物をQR化
+                        </button>
+                        <div style="font-size:10px; color:#666; margin-top:2px; line-height:1.3;">
+                            ※選択(黄色)状態の地物をQR化します。<br>
+                            (未選択時は画面内の全データ)
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. インポート -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel(this)">
+                    <span><i class="fas fa-file-import"></i> データ取り込み</span>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="panel-body">
+                    <div id="drop-zone" style="border:2px dashed #3498db; background:#f0f8ff; padding:15px; text-align:center; margin-bottom:10px; font-size:11px; color:#555; border-radius:5px;">
+                        <i class="fas fa-cloud-upload-alt" style="font-size:20px; color:#3498db; margin-bottom:5px;"></i><br>
+                        ここにファイルをドロップ<br>
+                        <span style="color:#999; font-size:10px;">(zip / geojson / kml / csv / tif)</span>
+                    </div>
+                    <div style="font-size:10px; color:#666; margin-bottom:10px; line-height:1.4;">
+                        ※CSVは選択中のレイヤーと結合します。<br>
+                        ※GeoTIFFは現在の座標系で表示します。
+                    </div>
+                    <div style="font-size:10px; font-weight:bold; margin-bottom:2px;">現在の座標系 (Shape/GeoTIFF):</div>
+                    <select id="crs-select" style="font-size:10px; margin-bottom:0;"></select>
+                </div>
+            </div>
+        </div>
+        <div id="status-bar">
+            <span id="status-msg">準備完了</span>
+            <span id="edit-status" style="font-weight:bold; color:#e67e22;"></span>
+        </div>
+    </div>
+
+    <div id="map">
+        <div class="map-switcher">
+            <div class="map-btn active" onclick="switchBaseMap('std', this)">標準</div>
+            <div class="map-btn" onclick="switchBaseMap('hillshade', this)">立体図</div>
+            <div class="map-btn" onclick="switchBaseMap('photo', this)">写真</div>
+        </div>
+        
+        <div class="scale-container">
+            <span style="margin-right:5px;">1 :</span>
+            <input type="number" id="scale-input" value="-" title="縮尺を入力">
+        </div>
+
+        <div id="attribute-panel">
+            <div class="attr-header">
+                <div class="attr-header-title">
+                    <i class="fas fa-info-circle"></i> 属性情報 <span id="attr-layer-name" style="font-size:11px; font-weight:normal; opacity:0.8;"></span>
+                </div>
+                <div style="display:flex;">
+                    <button class="panel-ctrl-btn" onclick="toggleAttributePanelSize()" title="展開/縮小">
+                        <i id="panel-expand-icon" class="fas fa-expand"></i>
+                    </button>
+                    <button class="panel-ctrl-btn" onclick="closeAttributePanel()" title="閉じる">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="attr-content" id="attr-content"></div>
+            <div class="attr-footer">
+                <button class="primary" onclick="saveAttributes()" style="width:auto; padding:8px 30px;">更新</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- モーダル群 (変更なしのため省略せず全て記述) -->
+<div id="global-drop-overlay">
+    <i class="fas fa-file-import"></i>
+    <div class="main-text">ここにドロップしてインポート</div>
+    <div class="sub-text">Shapefile, GeoJSON, KML, CSV, GeoTIFF</div>
+</div>
+
+<div id="context-menu" class="context-menu">
+    <ul>
+        <li id="ctx-copy" onclick="ctxCopy()"><i class="fas fa-copy"></i> コピー</li>
+        <li id="ctx-paste" onclick="ctxPaste()"><i class="fas fa-paste"></i> 貼り付け</li>
+        <li id="ctx-delete" onclick="ctxDelete()" style="color:#c0392b;"><i class="fas fa-trash"></i> 削除</li>
+    </ul>
+</div>
+
+<div id="table-modal-overlay">
+    <div id="table-modal">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:10px;">
+            <h3 style="margin:0;"><i class="fas fa-table"></i> 属性テーブル: <span id="table-layer-name"></span></h3>
+            <div style="font-size:12px; color:#666;">
+                <span id="table-row-count">0</span> 件
+            </div>
+        </div>
+        <div id="table-container"></div>
+        <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+            <button onclick="document.getElementById('table-modal-overlay').style.display='none'" style="width:auto; background:#eee; color:#333;">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="property-modal-overlay">
+    <div id="property-modal">
+        <h3 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:10px;"><i class="fas fa-cog"></i> レイヤー設定</h3>
+        <div class="prop-section-title">基本情報</div>
+        <div class="style-row">
+            <div class="style-label">レイヤー名</div>
+            <input type="text" id="prop-layer-name" class="style-input">
+        </div>
+        <div class="style-row">
+            <div class="style-label">不透明度</div>
+            <input type="range" id="prop-opacity" class="style-input" min="0" max="1" step="0.1">
+        </div>
+        
+        <!-- ベクターレイヤー専用設定 -->
+        <div id="prop-vector-only">
+            <div class="style-row">
+                <div class="style-label">地物数</div>
+                <span id="prop-feature-count" style="font-size:12px;">-</span>
+            </div>
+
+            <div class="prop-section-title">スタイル設定 (色・分類)</div>
+            <div class="style-row">
+                <div class="style-label">モード</div>
+                <select id="style-mode" class="style-input" onchange="toggleStyleMode()">
+                    <option value="single">単一色</option>
+                    <option value="categorized">値による分類</option>
+                </select>
+            </div>
+            
+            <div id="style-col-row" style="display:none; flex-direction:column; align-items:stretch; margin-bottom:10px;">
+                <div class="style-label" style="width:100%; margin-bottom:5px;">分類する列</div>
+                <div style="display:flex; gap:5px; width:100%;">
+                    <select id="style-attr" style="flex:1;"></select>
+                    <button class="secondary" onclick="generateCategories()" style="width:auto; padding:0 20px; white-space:nowrap;">分類</button>
+                </div>
+            </div>
+
+            <div id="style-single-options">
+                <div class="style-row">
+                    <div class="style-label">塗り色</div>
+                    <input type="color" id="style-fill-color" class="style-input" value="#ff0000">
+                </div>
+            </div>
+            <div id="style-category-list" class="color-list" style="display:none;">
+                <div style="text-align:center; color:#999;">「分類」ボタンを押してください</div>
+            </div>
+
+            <div class="prop-section-title">表示オプション</div>
+            <div class="style-row">
+                <div class="style-label">表示設定</div>
+                <div class="style-input" style="display:flex; gap:15px; align-items:center;">
+                    <label><input type="checkbox" id="style-outline-only"> 枠線のみ</label>
+                </div>
+            </div>
+            <div class="style-row">
+                <div class="style-label">ラベル表示</div>
+                <select id="style-label-field" class="style-input"><option value="">(なし)</option></select>
+            </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+            <button onclick="document.getElementById('property-modal-overlay').style.display='none'" style="width:auto; background:#eee; color:#333;">キャンセル</button>
+            <button class="primary" onclick="saveLayerProperties()" style="width:auto;">適用</button>
+        </div>
+    </div>
+</div>
+
+<div id="export-modal-overlay">
+    <div id="export-modal">
+        <h3 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:10px;"><i class="fas fa-save"></i> データ出力</h3>
+        <div class="export-section">
+            <div class="export-title"><i class="fas fa-layer-group"></i> レイヤーデータ保存</div>
+            <div style="font-size:12px; margin-bottom:5px;">対象: <span id="export-layer-name" style="font-weight:bold;">(選択なし)</span></div>
+            <div class="style-row">
+                <div class="style-label" style="width:60px;">名前</div>
+                <input type="text" id="export-filename" class="style-input" placeholder="ファイル名">
+            </div>
+            <div class="export-grid">
+                <button onclick="executeExport('geojson')">GeoJSON</button>
+                <button onclick="executeExport('csv')">CSV (SJIS)</button>
+                <button onclick="executeExport('kml')">KML</button>
+                <button class="earth-btn" onclick="executeExport('googleearth')">Google Earth</button>
+            </div>
+        </div>
+        <div class="export-section">
+            <div class="export-title"><i class="fas fa-print"></i> PDF印刷 (画面全体)</div>
+            <div class="style-row">
+                <div class="style-label" style="width:60px;">タイトル</div>
+                <input type="text" id="export-pdf-title" class="style-input" placeholder="図面タイトル">
+            </div>
+            <div class="style-row">
+                <div class="style-label" style="width:60px;">向き</div>
+                <div class="radio-group">
+                    <label><input type="radio" name="pdf-orientation" value="landscape" checked> 横 (Landscape)</label>
+                    <label><input type="radio" name="pdf-orientation" value="portrait"> 縦 (Portrait)</label>
+                </div>
+            </div>
+            <div style="font-size:10px; color:#666; margin-bottom:10px;">
+                ※A4用紙に合わせて、比率を維持して出力します。<br>
+                画面サイズによっては上下左右に余白が生じます。
+            </div>
+            <button class="primary" onclick="openPdfPreview()">PDFプレビュー</button>
+        </div>
+        <div style="display:flex; justify-content:flex-end; margin-top:auto;">
+            <button onclick="document.getElementById('export-modal-overlay').style.display='none'" style="width:auto; background:#eee; color:#333;">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="pdf-preview-modal-overlay">
+    <div id="pdf-preview-modal">
+        <h3 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:10px;">PDFプレビュー</h3>
+        <div id="pdf-preview-container">
+            <img id="pdf-preview-img" alt="Map Preview" />
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
+            <button onclick="closePdfPreview()" style="width:auto; background:#eee; color:#333;">キャンセル</button>
+            <button class="primary" onclick="downloadPdfFromPreview()" style="width:auto;">ダウンロード</button>
+        </div>
+    </div>
+</div>
+
+<div id="join-modal-overlay">
+    <div id="join-modal">
+        <h3 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:10px;"><i class="fas fa-link"></i> データ結合ウィザード</h3>
+        <p class="guide-text">地図データとCSVデータの間で、値が一致する列（IDやコードなど）を選んで紐付けます。</p>
+        <div class="join-step">
+            <div class="step-label">共通する列 (キー)</div>
+            <div class="match-container">
+                <div class="match-box">
+                    <i class="fas fa-map-marked-alt"></i> 地図データの列<br>
+                    <select id="join-map-key1"></select>
+                </div>
+                <div class="match-icon"><i class="fas fa-equals"></i></div>
+                <div class="match-box">
+                    <i class="fas fa-file-csv"></i> CSVデータの列<br>
+                    <select id="join-csv-key1"></select>
+                </div>
+            </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:auto;">
+            <button onclick="closeJoinModal()" style="width:auto; background:#eee; color:#333;">キャンセル</button>
+            <button class="primary" id="btn-execute-join" onclick="executeJoin()" style="width:auto;">結合実行</button>
+        </div>
+    </div>
+</div>
+
+<div id="qr-modal-overlay" onclick="closeQRModal(event)">
+    <div id="qr-modal">
+        <h3><i class="fas fa-mobile-alt"></i> モバイル同期</h3>
+        
+        <div id="qrcode"></div>
+        
+        <!-- 分割QRナビゲーション -->
+        <div id="qr-nav">
+            <button id="btn-qr-prev" class="qr-nav-btn" onclick="navigateQR(-1)"><i class="fas fa-chevron-left"></i></button>
+            <span id="qr-counter">1 / 1</span>
+            <button id="btn-qr-next" class="qr-nav-btn" onclick="navigateQR(1)"><i class="fas fa-chevron-right"></i></button>
+        </div>
+        
+        <div class="qr-note" style="font-size:12px; color:#666; margin-top:15px; line-height:1.5;">
+            スマホアプリ「Forestry Scout」で読み取ってください。<br>
+            <span style="color:#e74c3c; font-weight:bold;">※現在地図に表示されている範囲のデータのみ転送します。</span><br>
+            ※データ量が大きい場合、QRコードが分割されます。
+        </div>
+        
+        <!-- ファイル転送の案内を追加 -->
+        <div style="margin-top:15px; padding:10px; background:#e8f6f3; border:1px solid #aed6f1; border-radius:4px; text-align:left; font-size:12px; color:#2c3e50;">
+            <i class="fas fa-info-circle" style="color:#3498db;"></i> <b>推奨:</b><br>
+            データ量が大きい場合は、「データ出力」から<b>GeoJSONファイル</b>を保存し、スマホに送って開くことをお勧めします。
+        </div>
+
+        <button onclick="closeQRModal()" style="margin-top:20px; width:auto; padding:10px 30px;">閉じる</button>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/openlayers@4.6.5/dist/ol.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.15.0/proj4.js"></script>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geotiff"></script>
+
+<script>
+    // --- Global State ---
+    let layers = []; let activeLayerId = null; let currentEditLayerId = null; let editingPropLayerId = null;
+    let drawInteraction = null; let baseLayers = {}; let appClipboard = null; let contextMenuPosition = null;
+    let rightClickedFeature = null; let selectedFeatureForPanel = null; let pendingCsvData = null; let pdfPreviewDataUrl = null; 
+
+    // QR分割管理用
+    let qrChunks = [];
+    let qrCurrentIndex = 0;
+
+    const mapDiv = document.getElementById('map');
+    const statusMsg = document.getElementById('status-msg');
+    const editStatus = document.getElementById('edit-status');
+    const updateStatus = (m) => statusMsg.textContent = m;
+
+    const zones = [
+        { id: 9, epsg: 6677, lat: 36, lon: 139.833333, label: "9系 (東京, 関東, 福島)" },
+        { id: 1, epsg: 6669, lat: 33, lon: 129.5, label: "1系 (長崎, 鹿児島)" },
+        { id: 2, epsg: 6670, lat: 33, lon: 131.0, label: "2系 (福岡, 佐賀, 熊本, 大分, 宮崎)" },
+        { id: 3, epsg: 6671, lat: 36, lon: 132.16666666666666, label: "3系 (山口, 島根, 広島)" },
+        { id: 4, epsg: 6672, lat: 33, lon: 133.5, label: "4系 (香川, 愛媛, 徳島, 高知)" },
+        { id: 5, epsg: 6673, lat: 36, lon: 134.33333333333334, label: "5系 (兵庫, 鳥取, 岡山)" },
+        { id: 6, epsg: 6674, lat: 36, lon: 136.0, label: "6系 (京都, 大阪, 福井, 滋賀, 三重, 奈良, 和歌山)" },
+        { id: 7, epsg: 6675, lat: 36, lon: 137.16666666666666, label: "7系 (石川, 富山, 岐阜, 愛知)" },
+        { id: 8, epsg: 6676, lat: 36, lon: 138.5, label: "8系 (新潟, 長野, 山梨, 静岡)" },
+        { id: 10, epsg: 6678, lat: 40, lon: 140.83333333333334, label: "10系 (青森, 秋田, 山形, 岩手, 宮城)" },
+        { id: 11, epsg: 6679, lat: 44, lon: 140.25, label: "11系 (北海道 西部)" },
+        { id: 12, epsg: 6680, lat: 44, lon: 142.25, label: "12系 (北海道 中央部)" },
+        { id: 13, epsg: 6681, lat: 44, lon: 144.25, label: "13系 (北海道 東部)" }
+    ];
+    const sel = document.getElementById('crs-select');
+    zones.forEach(z => {
+        proj4.defs(`EPSG:${z.epsg}`, `+proj=tmerc +lat_0=${z.lat} +lon_0=${z.lon} +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`);
+        const opt = document.createElement('option'); opt.value = `EPSG:${z.epsg}`; opt.text = z.label; sel.appendChild(opt);
+    });
+    ol.proj.setProj4(proj4);
+
+    baseLayers.std = new ol.layer.Tile({ source: new ol.source.XYZ({ url: "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", attributions: "地理院", crossOrigin: 'anonymous' }), visible: true });
+    baseLayers.hillshade = new ol.layer.Tile({ source: new ol.source.XYZ({ url: "https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png", attributions: "地理院", crossOrigin: 'anonymous', maxZoom: 16 }), visible: false });
+    baseLayers.photo = new ol.layer.Tile({ source: new ol.source.XYZ({ url: "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg", attributions: "地理院", crossOrigin: 'anonymous' }), visible: false });
+
+    const map = new ol.Map({
+        target: 'map',
+        controls: ol.control.defaults().extend([new ol.control.ScaleLine()]),
+        layers: [ baseLayers.std, baseLayers.hillshade, baseLayers.photo ],
+        view: new ol.View({ center: ol.proj.fromLonLat([138, 36]), zoom: 6 })
+    });
+
+    window.switchBaseMap = function(type, btn) {
+        Object.keys(baseLayers).forEach(k => baseLayers[k].setVisible(k === type));
+        document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active');
+    };
+
+    const scaleInput = document.getElementById('scale-input');
+    const DPI = 96; const MPU = 39.37;
+    map.on('moveend', function() { if (document.activeElement === scaleInput) return; const res = map.getView().getResolution(); scaleInput.value = Math.round(res * MPU * DPI); });
+    scaleInput.addEventListener('change', function() { const val = parseInt(this.value, 10); if (val > 0) map.getView().setResolution(val / (MPU * DPI)); });
+    scaleInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') this.blur(); });
+
+    function createNewEmptyLayer() { const name = prompt("新規レイヤー名:", "新規レイヤー"); if (name) addNewLayer(name, []); }
+    
+    // レイヤー追加処理の拡張 (ラスター対応)
+    function addNewLayer(name, features, isRaster = false, rasterSource = null) {
+        const id = Date.now().toString();
+        let layer;
+        
+        if (isRaster && rasterSource) {
+            // ラスターレイヤー (GeoTIFF)
+            layer = new ol.layer.Image({
+                source: rasterSource,
+                opacity: 0.8
+            });
+            layers.push({ id, name, layerObj: layer, type: 'raster' });
+        } else {
+            // ベクターレイヤー
+            const r = Math.floor(Math.random()*200); const g = Math.floor(Math.random()*200); const b = Math.floor(Math.random()*200);
+            const hex = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+            const styleConfig = { mode: 'single', singleColor: hex, outlineOnly: false, labelField: '', categories: { field: '', rules: {} } };
+            const source = new ol.source.Vector({ features: features });
+            layer = new ol.layer.Vector({ source: source, style: (feature, resolution) => getStyle(feature, resolution, styleConfig) });
+            layers.push({ id, name, layerObj: layer, styleConfig, type: 'vector' });
+            
+            if(features.length > 0) map.getView().fit(source.getExtent(), { padding:[50,50,50,50], duration:1000 });
+        }
+        
+        // レイヤー順序制御: ラスタは常に背景地図の直上(z-index低め)、ベクタはさらにその上
+        // OpenLayers 4ではレイヤー配列の順序が描画順序。
+        // ここでは単純に追加しているが、実用上は並べ替えが必要かもしれない。
+        // とりあえず追加する。
+        map.addLayer(layer);
+        
+        setActiveLayer(id); 
+        updateStatus(`レイヤー追加: ${name}`);
+    }
+
+    function getStyle(feature, resolution, config) {
+        let fillColorStr = config.singleColor;
+        if (config.mode === 'categorized' && config.categories.field) {
+            const val = feature.getProperties()[config.categories.field];
+            if (config.categories.rules[val]) fillColorStr = config.categories.rules[val]; else fillColorStr = '#999999';
+        }
+        const rgb = hexToRgb(fillColorStr);
+        const fill = config.outlineOnly ? null : new ol.style.Fill({ color: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.4)` });
+        const stroke = new ol.style.Stroke({ color: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1.0)`, width: 2 });
+        let textStyle = null;
+        if (config.labelField && resolution < 20) {
+            const labelVal = feature.getProperties()[config.labelField];
+            textStyle = new ol.style.Text({
+                text: labelVal ? String(labelVal) : '',
+                font: 'bold 12px "Meiryo", sans-serif',
+                fill: new ol.style.Fill({ color: '#000' }),
+                stroke: new ol.style.Stroke({ color: '#fff', width: 2 }),
+                overflow: true
+            });
+        }
+        return new ol.style.Style({ fill: fill, stroke: stroke, image: new ol.style.Circle({ radius: 5, fill: new ol.style.Fill({color: fillColorStr}) }), text: textStyle });
+    }
+    function hexToRgb(hex) { var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : { r: 0, g: 0, b: 0 }; }
+
+    function renderLayerList() {
+        const ul = document.getElementById('layer-list'); ul.innerHTML = "";
+        if(layers.length===0) { ul.innerHTML = '<li style="padding:15px;text-align:center;color:#999;font-size:12px">データなし</li>'; return; }
+        [...layers].reverse().forEach(l => {
+            const li = document.createElement('li');
+            li.className = `layer-item ${l.id === activeLayerId ? 'active-layer' : ''}`;
+            if(l.id === currentEditLayerId) li.classList.add('editing-mode');
+            const rowMain = document.createElement('div'); rowMain.className = 'layer-row-main';
+            const chk = document.createElement('input'); chk.type = 'checkbox'; chk.checked = l.layerObj.getVisible();
+            chk.onchange = e => l.layerObj.setVisible(e.target.checked);
+            const span = document.createElement('span'); span.className = 'layer-name'; span.textContent = l.name; span.title = l.name; span.onclick = () => setActiveLayer(l.id);
+            
+            const createBtn = (cls, icon, title, action, disabled=false) => {
+                const b = document.createElement('button'); 
+                b.className = `btn-icon ${cls} ${disabled ? 'disabled' : ''}`; 
+                b.innerHTML = `<i class="${icon}"></i>`; 
+                b.title = title;
+                if(!disabled) b.onclick = e => { e.stopPropagation(); action(l.id); }; 
+                return b;
+            };
+            
+            // ラスタレイヤーの場合は一部機能を無効化
+            const isVector = l.type === 'vector';
+            
+            rowMain.append(
+                chk, span, 
+                createBtn('focus-btn', 'fas fa-crosshairs', 'ズーム', focusLayer), 
+                createBtn('table-btn', 'fas fa-table', '属性テーブル', openTableModal, !isVector), 
+                createBtn(`edit-btn ${l.id === currentEditLayerId ? 'active' : ''}`, 'fas fa-pen', '編集モード', toggleEditMode, !isVector), 
+                createBtn('prop-btn', 'fas fa-cog', '設定', openPropertyModal), 
+                createBtn('delete', 'fas fa-trash', '削除', id => { if(confirm("削除しますか？")) removeLayer(id); })
+            );
+            li.appendChild(rowMain); ul.appendChild(li);
+        });
+    }
+
+    function setActiveLayer(id) { activeLayerId = id; renderLayerList(); updateAttributeList(); updateFilterCandidates(); updateStatus(`選択中: ${layers.find(l=>l.id===id).name}`); }
+    function removeLayer(id) { const idx = layers.findIndex(l=>l.id===id); if(idx>=0) { map.removeLayer(layers[idx].layerObj); layers.splice(idx,1); if(activeLayerId===id) activeLayerId = null; if(currentEditLayerId===id) toggleEditMode(null); renderLayerList(); updateAttributeList(); } }
+    
+    function focusLayer(id) { 
+        const layer = layers.find(l => l.id === id); 
+        if (!layer) return;
+        
+        let extent;
+        if (layer.type === 'vector') {
+            if (layer.layerObj.getSource().getFeatures().length > 0) extent = layer.layerObj.getSource().getExtent();
+        } else if (layer.type === 'raster') {
+            extent = layer.layerObj.getSource().getImageExtent();
+        }
+        
+        if (extent) { 
+            map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 }); 
+            setActiveLayer(id); 
+        } else {
+            alert("データ範囲を取得できません");
+        }
+    }
+
+    const selectInteraction = new ol.interaction.Select({ condition: ol.events.condition.click, toggleCondition: ol.events.condition.platformModifierKeyOnly, hitTolerance: 10 });
+    map.addInteraction(selectInteraction);
+    selectInteraction.on('select', e => { if(e.selected.length > 0) showAttributePanel(e.selected[0]); else closeAttributePanel(); });
+
+    const ctxMenu = document.getElementById('context-menu');
+    map.getViewport().addEventListener('contextmenu', function (e) {
+        if (!currentEditLayerId) return; 
+        e.preventDefault(); const pixel = map.getEventPixel(e); contextMenuPosition = map.getCoordinateFromPixel(pixel);
+        const editLayer = layers.find(l => l.id === currentEditLayerId); rightClickedFeature = null;
+        map.forEachFeatureAtPixel(pixel, function(feature, layer) { if (layer === editLayer.layerObj) { rightClickedFeature = feature; return true; } }, { hitTolerance: 5 });
+        const copyBtn = document.getElementById('ctx-copy'); const deleteBtn = document.getElementById('ctx-delete'); const pasteBtn = document.getElementById('ctx-paste');
+        if (rightClickedFeature) { copyBtn.classList.remove('disabled'); deleteBtn.classList.remove('disabled'); } else { copyBtn.classList.add('disabled'); deleteBtn.classList.add('disabled'); }
+        if (appClipboard) pasteBtn.classList.remove('disabled'); else pasteBtn.classList.add('disabled');
+        ctxMenu.style.display = 'block'; ctxMenu.style.left = e.pageX + 'px'; ctxMenu.style.top = e.pageY + 'px';
+    });
+    document.addEventListener('click', () => ctxMenu.style.display = 'none');
+    window.ctxCopy = () => { if (rightClickedFeature) { appClipboard = rightClickedFeature.clone(); updateStatus("コピーしました"); } };
+    window.ctxDelete = () => { if (!rightClickedFeature || !currentEditLayerId) return; if(confirm("削除しますか？")) { layers.find(l => l.id === currentEditLayerId).layerObj.getSource().removeFeature(rightClickedFeature); updateStatus("削除しました"); closeAttributePanel(); } };
+    window.ctxPaste = () => { if (!appClipboard || !currentEditLayerId) return; const newFeature = appClipboard.clone(); const geom = newFeature.getGeometry(); const center = ol.extent.getCenter(geom.getExtent()); geom.translate(contextMenuPosition[0] - center[0], contextMenuPosition[1] - center[1]); newFeature.setId(null); layers.find(l => l.id === currentEditLayerId).layerObj.getSource().addFeature(newFeature); updateStatus("貼り付けました"); };
+
+    window.toggleDraw = function(type) {
+        if (drawInteraction) { map.removeInteraction(drawInteraction); drawInteraction = null; }
+        selectInteraction.setActive(true); document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active')); mapDiv.classList.remove('drawing');
+        if (!type) return;
+        selectInteraction.setActive(false);
+        if(type==='Polygon') document.getElementById('btn-draw-poly').classList.add('active'); if(type==='LineString') document.getElementById('btn-draw-line').classList.add('active');
+        mapDiv.classList.add('drawing');
+        let targetSource = currentEditLayerId ? layers.find(l => l.id === currentEditLayerId).layerObj.getSource() : new ol.source.Vector();
+        drawInteraction = new ol.interaction.Draw({ source: targetSource, type: type });
+        drawInteraction.on('drawend', e => {
+            const f = e.feature; const g = f.getGeometry(); const p = {'CREATED':new Date().toLocaleString()};
+            if(type==='Polygon') p['AREA_HA']=(ol.Sphere.getArea(g)/10000).toFixed(4); if(type==='LineString') p['LEN_M']=ol.Sphere.getLength(g).toFixed(2);
+            f.setProperties(p); 
+            if(!currentEditLayerId) addNewLayer(`描画_${new Date().toTimeString().split(' ')[0]}`, [f]); else updateStatus("追記しました");
+            
+            // 描画モードを自動解除 (修正点)
+            setTimeout(() => { toggleDraw(null); }, 100);
+        });
+        map.addInteraction(drawInteraction);
+    };
+    window.toggleEditMode = function(id) { if (currentEditLayerId === id) { currentEditLayerId = null; editStatus.textContent = ""; toggleDraw(null); } else { currentEditLayerId = id; editStatus.textContent = `[編集中: ${layers.find(l=>l.id===id).name}]`; setActiveLayer(id); } renderLayerList(); };
+
+    const dropOverlay = document.getElementById('global-drop-overlay');
+    window.addEventListener('dragover', (e) => { e.preventDefault(); dropOverlay.classList.add('active'); });
+    window.addEventListener('dragleave', (e) => { if (e.clientX === 0 && e.clientY === 0) dropOverlay.classList.remove('active'); });
+    window.addEventListener('drop', (e) => {
+        e.preventDefault(); dropOverlay.classList.remove('active');
+        const f = e.dataTransfer.files[0]; if (!f) return; updateStatus("読込中...");
+        try {
+            if(f.name.match(/\.zip$/i)) { const r = new FileReader(); r.onload = ev => { shp(ev.target.result).then(g => importGeoJSON(g, f.name)).catch(err => { alert("ZIP解析エラー: " + err); updateStatus("エラー"); }); }; r.readAsArrayBuffer(f); }
+            else if(f.name.match(/\.json$|\.geojson$/i)) { const r = new FileReader(); r.onload = ev => { importGeoJSON(JSON.parse(ev.target.result), f.name); }; r.readAsText(f); }
+            else if(f.name.match(/\.kml$/i)) { const r = new FileReader(); r.onload = ev => { addNewLayer(f.name, new ol.format.KML({extractStyles:false}).readFeatures(ev.target.result, {featureProjection:'EPSG:3857'})); }; r.readAsText(f); }
+            else if(f.name.match(/\.csv$/i)) { handleCSVImport(f); }
+            else if(f.name.match(/\.tif$|\.tiff$/i)) { handleGeoTiffImport(f); }
+            else { alert("未対応形式"); updateStatus("エラー"); }
+        } catch(err) { alert("エラー: " + err); updateStatus("エラー"); }
+    });
+
+    // GeoTIFFインポート (geotiff.js + Canvas + OpenLayers ImageStatic)
+    async function handleGeoTiffImport(file) {
+        try {
+            updateStatus("GeoTIFF解析中...");
+            const tiff = await GeoTIFF.fromBlob(file);
+            const image = await tiff.getImage();
+            
+            const width = image.getWidth();
+            const height = image.getHeight();
+            // ラスタデータを読み込む (RGBと仮定)
+            const rasters = await image.readRasters();
+            
+            // Canvasに描画
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(width, height);
+            
+            // シンプルなRGBまたはグレースケール変換
+            for (let i = 0; i < width * height; i++) {
+                if (rasters.length >= 3) {
+                    // RGB
+                    imageData.data[i * 4] = rasters[0][i];
+                    imageData.data[i * 4 + 1] = rasters[1][i];
+                    imageData.data[i * 4 + 2] = rasters[2][i];
+                    imageData.data[i * 4 + 3] = 255; // Alpha
+                } else {
+                    // Grayscale
+                    const val = rasters[0][i];
+                    imageData.data[i * 4] = val;
+                    imageData.data[i * 4 + 1] = val;
+                    imageData.data[i * 4 + 2] = val;
+                    imageData.data[i * 4 + 3] = 255;
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+            
+            // 画像範囲 (Extent) の計算
+            // 本来はGeoKeysからCRSを読み取るべきだが、ここではユーザー選択のCRSを使用する簡易実装
+            // TiePointとPixelScaleを使用
+            const tiepoint = image.getTiePoints()[0];
+            const pixelScale = image.getFileDirectory().ModelPixelScale;
+            let extent = null;
+            
+            if (tiepoint && pixelScale) {
+                // 平面直角座標系などのローカル座標
+                const minX = tiepoint.x;
+                const maxY = tiepoint.y;
+                const maxX = minX + width * pixelScale[0];
+                const minY = maxY - height * pixelScale[1];
+                
+                // 座標変換 (EPSG:選択中 -> EPSG:3857)
+                const epsg = document.getElementById('crs-select').value;
+                if(!epsg || !proj4.defs(epsg)) { 
+                    alert("GeoTIFFの座標系を選択してください (左下のプルダウン)"); 
+                    updateStatus("座標系未選択");
+                    return; 
+                }
+                const trans = proj4(epsg, 'EPSG:3857').forward;
+                
+                const minXY = trans([minX, minY]);
+                const maxXY = trans([maxX, maxY]);
+                extent = [minXY[0], minXY[1], maxXY[0], maxXY[1]];
+            } else {
+                alert("GeoTIFFから位置情報を読み取れませんでした。");
+                updateStatus("エラー");
+                return;
+            }
+
+            // ImageStaticソース作成
+            const source = new ol.source.ImageStatic({
+                url: canvas.toDataURL(),
+                imageExtent: extent,
+                projection: 'EPSG:3857' // Canvas画像自体は変換済み座標として配置
+            });
+            
+            addNewLayer(file.name, [], true, source);
+            updateStatus("読込完了");
+
+        } catch (e) {
+            console.error(e);
+            alert("GeoTIFF読込エラー: " + e.message);
+            updateStatus("エラー");
+        }
+    }
+
+    // 修正版 importGeoJSON: 堅牢性を向上
+    function importGeoJSON(json, name) {
+        try {
+            if (!json) throw new Error("データが空です");
+            const fmt = new ol.format.GeoJSON();
+            const epsg = document.getElementById('crs-select').value;
+            if(!epsg || !proj4.defs(epsg)) { alert("座標系を選択してください"); return; }
+
+            const trans = proj4(epsg, 'EPSG:3857').forward;
+            let feats = [];
+            const arr = Array.isArray(json) ? json : [json];
+            
+            arr.forEach(d => {
+                if (!d.features || !Array.isArray(d.features) || d.features.length === 0) return;
+                let isLatLon = false;
+                try {
+                    const validFeature = d.features.find(f => f.geometry && f.geometry.coordinates && f.geometry.coordinates.length > 0);
+                    if (validFeature) {
+                        const getFirstCoord = (coords) => Array.isArray(coords[0]) ? getFirstCoord(coords[0]) : coords[0];
+                        const v = getFirstCoord(validFeature.geometry.coordinates);
+                        if (v > 120 && v < 155) isLatLon = true;
+                    }
+                } catch(e) { console.warn("座標系判定失敗", e); }
+                
+                let fs;
+                if(isLatLon) {
+                    fs = fmt.readFeatures(d, {featureProjection:'EPSG:3857'});
+                } else {
+                    fs = fmt.readFeatures(d);
+                    fs.forEach(f => {
+                        const geom = f.getGeometry();
+                        if (geom) {
+                            geom.applyTransform((c, o, s) => {
+                                for(let i=0; i<c.length; i+=2) { const r = trans([c[i], c[i+1]]); c[i] = r[0]; c[i+1] = r[1]; } return c; 
+                            });
+                        }
+                    });
+                }
+                fs.forEach(f=>{
+                    const g = f.getGeometry();
+                    if (g) {
+                        const p = f.getProperties();
+                        if(g.getType().indexOf('Polygon') > -1) p['AREA_HA'] = (ol.Sphere.getArea(g) / 10000).toFixed(4);
+                        if(g.getType().indexOf('Line') > -1) p['LEN_M'] = ol.Sphere.getLength(g).toFixed(2);
+                        f.setProperties(p);
+                    }
+                });
+                feats = feats.concat(fs);
+            });
+
+            if (feats.length === 0) { alert("有効な地物が読み込めませんでした"); return; }
+            addNewLayer(name, feats);
+            updateStatus("読込完了");
+        } catch(e) { 
+            console.error(e); alert("GeoJSON変換エラー: " + e.message); updateStatus("エラー");
+        }
+    }
+
+    function handleCSVImport(file) {
+        if(!activeLayerId) { alert("結合先のレイヤーを選択してください"); return; }
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const codes = new Uint8Array(e.target.result); const encoding = Encoding.detect(codes); const unicodeString = Encoding.convert(codes, { to: 'UNICODE', from: encoding || 'SJIS', type: 'string' });
+                Papa.parse(unicodeString, { header: true, skipEmptyLines: true, complete: res => { pendingCsvData = res.data; if(pendingCsvData.length === 0) { alert("CSVデータ空"); return; } openJoinModal(); updateStatus("CSV解析完了"); }, error: (err) => alert("CSVエラー: " + err) });
+            } catch (err) { alert("CSV読込例外: " + err); }
+        }; reader.readAsArrayBuffer(file);
+    }
+
+    window.openExportModal = function() {
+        if (!activeLayerId && layers.length > 0) setActiveLayer(layers[layers.length-1].id);
+        const layerName = activeLayerId ? layers.find(l => l.id === activeLayerId).name : "レイヤー未選択";
+        document.getElementById('export-layer-name').textContent = layerName;
+        document.getElementById('export-filename').value = layerName;
+        document.getElementById('export-pdf-title').value = layerName + " 図面";
+        document.getElementById('export-modal-overlay').style.display = 'flex';
+    };
+    window.executeExport = function(type) {
+        if(!activeLayerId) { alert("レイヤーを選択してください"); return; }
+        const l = layers.find(x=>x.id===activeLayerId);
+        // ラスタはエクスポート不可
+        if (l.type === 'raster') { alert("画像レイヤーはエクスポートできません"); return; }
+        const f = l.layerObj.getSource().getFeatures(); let filename = document.getElementById('export-filename').value || l.name; 
+        if (type === 'kml' || type==='googleearth') { const kmlStr = new ol.format.KML().writeFeatures(f, { dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' }); down(kmlStr, filename + '.kml', 'application/vnd.google-earth.kml+xml'); } 
+        else if(type==='geojson') { const s = new ol.format.GeoJSON().writeFeatures(f, {dataProjection:'EPSG:4326', featureProjection:'EPSG:3857'}); down(s, filename + '.geojson', 'application/json'); } 
+        else { const d = f.map(ft => { const p = ft.getProperties(); const r = {}; Object.keys(p).forEach(k=>{ if(k!=='geometry'&&k!=='style') r[k]=p[k]; }); return r; }); const u = new TextEncoder().encode(Papa.unparse(d)); const sjis = Encoding.convert(u, {to:'SJIS', from:'UTF8'}); down(new Uint8Array(sjis), filename + '.csv', 'text/csv'); }
+    };
+    function down(c,n,t) { const b=new Blob([c],{type:t}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=n; a.click(); }
+
+    window.openPdfPreview = function() {
+        const title = document.getElementById('export-pdf-title').value || "図面"; updateStatus("プレビュー生成中...");
+        map.once('postcompose', function(event) { generateMapCanvasWithOverlays(event.context.canvas, title).then(canvas => { pdfPreviewDataUrl = canvas.toDataURL('image/jpeg', 0.9); document.getElementById('pdf-preview-img').src = pdfPreviewDataUrl; document.getElementById('pdf-preview-modal-overlay').style.display = 'flex'; updateStatus("プレビュー表示"); }); });
+        map.renderSync();
+    };
+    window.closePdfPreview = () => { document.getElementById('pdf-preview-modal-overlay').style.display = 'none'; pdfPreviewDataUrl = null; };
+    window.downloadPdfFromPreview = function() {
+        if (!pdfPreviewDataUrl) return;
+        const title = document.getElementById('export-pdf-title').value || "図面"; const orientation = document.querySelector('input[name="pdf-orientation"]:checked').value;
+        const { jsPDF } = window.jspdf; const pdf = new jsPDF(orientation, 'mm', 'a4');
+        const a4w = 210, a4h = 297; const pageWidth = orientation === 'landscape' ? a4h : a4w; const pageHeight = orientation === 'landscape' ? a4w : a4h;
+        const imgProps = pdf.getImageProperties(pdfPreviewDataUrl); const imgRatio = imgProps.width / imgProps.height; const pageRatio = pageWidth / pageHeight;
+        let renderW, renderH; if (imgRatio > pageRatio) { renderW = pageWidth; renderH = pageWidth / imgRatio; } else { renderH = pageHeight; renderW = pageHeight * imgRatio; }
+        const x = (pageWidth - renderW) / 2; const y = (pageHeight - renderH) / 2;
+        pdf.addImage(pdfPreviewDataUrl, 'JPEG', x, y, renderW, renderH); pdf.save(title + '.pdf'); closePdfPreview();
+    };
+    function generateMapCanvasWithOverlays(mapCanvas, titleText) {
+        return new Promise(resolve => {
+            const width = mapCanvas.width; const height = mapCanvas.height; const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d');
+            ctx.drawImage(mapCanvas, 0, 0); 
+            const fontSizeTitle = Math.round(height * 0.05); const fontSizeNormal = Math.round(height * 0.025); const padding = Math.round(height * 0.02);
+            ctx.fillStyle = "rgba(255, 255, 255, 0.8)"; ctx.fillRect(width/2 - (titleText.length*fontSizeTitle)/1.5, padding, titleText.length*fontSizeTitle*1.3, fontSizeTitle + padding);
+            ctx.font = `bold ${fontSizeTitle}px Meiryo, sans-serif`; ctx.fillStyle = "#000"; ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillText(titleText, width / 2, padding + 5);
+            const compassSize = Math.round(height * 0.08); const cx = width - padding * 3 - compassSize / 2; const cy = padding * 2 + compassSize / 2;
+            ctx.fillStyle = "rgba(255, 255, 255, 0.6)"; ctx.beginPath(); ctx.arc(cx, cy, compassSize / 1.5, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "#333"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, cy - compassSize / 2); ctx.lineTo(cx - compassSize / 4, cy + compassSize / 2); ctx.lineTo(cx, cy + compassSize / 4); ctx.lineTo(cx + compassSize / 4, cy + compassSize / 2); ctx.closePath(); ctx.fillStyle = "#e74c3c"; ctx.fill(); ctx.stroke(); ctx.font = `bold ${fontSizeNormal}px sans-serif`; ctx.fillStyle = "#000"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillText("N", cx, cy - compassSize / 2 - fontSizeNormal + 10);
+            
+            const visibleLayers = layers.filter(l => l.layerObj.getVisible());
+            if (visibleLayers.length > 0) {
+                const legendW = width * 0.2; const legendH = (visibleLayers.length * (fontSizeNormal + 10)) + 40; const lx = width - legendW - padding; const ly = height - legendH - padding;
+                ctx.fillStyle = "rgba(255, 255, 255, 0.9)"; ctx.fillRect(lx, ly, legendW, legendH); ctx.strokeStyle = "#ccc"; ctx.lineWidth = 1; ctx.strokeRect(lx, ly, legendW, legendH); ctx.fillStyle = "#000"; ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillText("凡例", lx + 10, ly + 10);
+                visibleLayers.forEach((l, i) => { 
+                    const y = ly + 40 + (i * (fontSizeNormal + 10));
+                    // ベクターのみ凡例表示
+                    if (l.type === 'vector') {
+                        ctx.fillStyle = l.styleConfig.singleColor || '#999'; ctx.fillRect(lx + 10, y, fontSizeNormal, fontSizeNormal); ctx.strokeRect(lx + 10, y, fontSizeNormal, fontSizeNormal); ctx.fillStyle = "#000"; ctx.fillText(l.name, lx + 20 + fontSizeNormal, y); 
+                    } else {
+                        // ラスタ凡例 (簡易)
+                        ctx.fillStyle = '#666'; ctx.fillRect(lx + 10, y, fontSizeNormal, fontSizeNormal); ctx.fillStyle = "#000"; ctx.fillText(l.name + "(画像)", lx + 20 + fontSizeNormal, y);
+                    }
+                });
+            }
+            resolve(canvas);
+        });
+    }
+
+    window.openTableModal = function(layerId) {
+        const layer = layers.find(l => l.id === layerId); 
+        if (layer.type === 'raster') return; // ラスタは無視
+        document.getElementById('table-layer-name').textContent = layer.name;
+        const features = layer.layerObj.getSource().getFeatures(); document.getElementById('table-row-count').textContent = features.length;
+        const container = document.getElementById('table-container'); container.innerHTML = "";
+        if (features.length === 0) { container.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">データなし</div>'; } 
+        else {
+            const allKeys = new Set(); features.forEach(f => Object.keys(f.getProperties()).forEach(k => { if(k!=='geometry' && k!=='style') allKeys.add(k); }));
+            const keys = Array.from(allKeys).sort();
+            let html = '<table class="data-table"><thead><tr>'; keys.forEach(k => html += `<th>${k}</th>`); html += '</tr></thead><tbody>';
+            features.forEach(f => { html += '<tr>'; const props = f.getProperties(); keys.forEach(k => html += `<td>${props[k]!==undefined?props[k]:""}</td>`); html += '</tr>'; });
+            html += '</tbody></table>'; container.innerHTML = html;
+        }
+        document.getElementById('table-modal-overlay').style.display = 'flex';
+    };
+
+    window.executeJoin = function() {
+        if(!pendingCsvData || !activeLayerId) return;
+        const btn = document.getElementById('btn-execute-join'); const originalText = btn.textContent; btn.textContent = "処理中..."; btn.disabled = true; document.body.style.cursor = 'wait';
+        setTimeout(() => {
+            try {
+                const mk1 = document.getElementById('join-map-key1').value; const ck1 = document.getElementById('join-csv-key1').value;
+                const layer = layers.find(l => l.id === activeLayerId); 
+                if (layer.type === 'raster') { alert("画像レイヤーには結合できません"); return; }
+                const features = layer.layerObj.getSource().getFeatures();
+                let count = 0; const csvMap = new Map(); pendingCsvData.forEach(row => { if (row[ck1] != null) csvMap.set(String(row[ck1]).trim(), row); });
+                features.forEach(f => { const val = f.getProperties()[mk1]; if (val != null && csvMap.has(String(val).trim())) { f.setProperties({...f.getProperties(), ...csvMap.get(String(val).trim())}); count++; } });
+                alert(count > 0 ? `${count}件結合しました` : "一致データなし"); if (count > 0) { updateAttributeList(); updateFilterCandidates(); closeJoinModal(); }
+            } catch (err) { alert("エラー: " + err); } finally { btn.textContent = originalText; btn.disabled = false; document.body.style.cursor = 'default'; }
+        }, 50);
+    };
+    window.openJoinModal = function() {
+        if(!activeLayerId || !pendingCsvData) return;
+        const layer = layers.find(l => l.id === activeLayerId);
+        if (layer.type === 'raster') { alert("画像レイヤーには結合できません"); return; }
+        const features = layer.layerObj.getSource().getFeatures();
+        const mapAttrs = Object.keys(features[0].getProperties()).filter(k => k!=='geometry' && k!=='style');
+        const csvAttrs = Object.keys(pendingCsvData[0]);
+        const populate = (id, list) => { const s = document.getElementById(id); s.innerHTML = ""; list.forEach(k => s.appendChild(new Option(k, k))); };
+        populate('join-map-key1', mapAttrs); populate('join-csv-key1', csvAttrs);
+        const findKey = (list, pattern) => list.find(k => pattern.test(k));
+        const mk1 = findKey(mapAttrs, /林班|RINBAN|NO|ID/i); if(mk1) document.getElementById('join-map-key1').value = mk1;
+        const ck1 = findKey(csvAttrs, /林班|RINBAN|NO|ID/i); if(ck1) document.getElementById('join-csv-key1').value = ck1;
+        document.getElementById('join-modal-overlay').style.display = 'flex';
+    }
+    window.closeJoinModal = () => { document.getElementById('join-modal-overlay').style.display = 'none'; pendingCsvData = null; };
+
+    window.openPropertyModal = function(layerId) {
+        editingPropLayerId = layerId; const layer = layers.find(l => l.id === layerId); 
+        document.getElementById('prop-layer-name').value = layer.name; document.getElementById('prop-opacity').value = layer.layerObj.getOpacity();
+        
+        // ラスタ/ベクタでUI切り替え
+        const vecUI = document.getElementById('prop-vector-only');
+        if (layer.type === 'raster') {
+            vecUI.style.display = 'none';
+        } else {
+            vecUI.style.display = 'block';
+            const config = layer.styleConfig;
+            document.getElementById('prop-feature-count').textContent = layer.layerObj.getSource().getFeatures().length + " 件";
+            document.getElementById('style-mode').value = config.mode; document.getElementById('style-fill-color').value = config.singleColor; document.getElementById('style-outline-only').checked = config.outlineOnly;
+            const features = layer.layerObj.getSource().getFeatures();
+            const attrs = features.length > 0 ? Object.keys(features[0].getProperties()).filter(k=>k!=='geometry'&&k!=='style') : [];
+            const labelSel = document.getElementById('style-label-field'); const attrSel = document.getElementById('style-attr');
+            labelSel.innerHTML = '<option value="">(なし)</option>'; attrSel.innerHTML = '';
+            attrs.forEach(k => { labelSel.appendChild(new Option(k, k)); attrSel.appendChild(new Option(k, k)); });
+            labelSel.value = config.labelField; if(config.categories.field) attrSel.value = config.categories.field;
+            toggleStyleMode(); if(config.mode === 'categorized') generateCategories(true);
+        }
+        document.getElementById('property-modal-overlay').style.display = 'flex';
+    };
+    window.saveLayerProperties = function() {
+        if (!editingPropLayerId) return; const layerData = layers.find(l => l.id === editingPropLayerId);
+        layerData.name = document.getElementById('prop-layer-name').value; layerData.layerObj.setOpacity(parseFloat(document.getElementById('prop-opacity').value));
+        
+        if (layerData.type === 'vector') {
+            const config = layerData.styleConfig;
+            config.mode = document.getElementById('style-mode').value; config.outlineOnly = document.getElementById('style-outline-only').checked; config.labelField = document.getElementById('style-label-field').value;
+            if (config.mode === 'single') config.singleColor = document.getElementById('style-fill-color').value; else { config.categories.field = document.getElementById('style-attr').value; config.categories.rules = {}; document.querySelectorAll('.cat-color-input').forEach(input => config.categories.rules[input.dataset.label] = input.value); }
+            layerData.layerObj.setStyle((f, r) => getStyle(f, r, config));
+        }
+        document.getElementById('property-modal-overlay').style.display = 'none'; renderLayerList();
+    };
+    window.toggleStyleMode = function() {
+        const mode = document.getElementById('style-mode').value;
+        const singleOpts = document.getElementById('style-single-options'); const colRow = document.getElementById('style-col-row'); const catList = document.getElementById('style-category-list');
+        if (mode === 'single') { singleOpts.style.display = 'block'; colRow.style.display = 'none'; catList.style.display = 'none'; } else { singleOpts.style.display = 'none'; colRow.style.display = 'flex'; catList.style.display = 'block'; }
+    };
+    window.generateCategories = function(useExisting = false) {
+        const attr = document.getElementById('style-attr').value; if(!attr) return;
+        const layerData = layers.find(l => l.id === editingPropLayerId); const container = document.getElementById('style-category-list'); container.innerHTML = "";
+        if(useExisting && layerData.styleConfig.categories.field === attr) { const rules = layerData.styleConfig.categories.rules; Object.keys(rules).forEach(val => createCategoryRow(val, rules[val], container)); return; }
+        const features = layerData.layerObj.getSource().getFeatures(); const values = new Set(); features.forEach(f => values.add(f.getProperties()[attr]));
+        const valArray = Array.from(values).sort(); valArray.forEach((val, i) => { const hue = Math.floor((360 / valArray.length) * i); createCategoryRow(val, `hsl(${hue}, 70%, 50%)`, container); });
+    };
+    function createCategoryRow(label, color, container) {
+        const div = document.createElement('div'); div.className = 'color-item';
+        div.innerHTML = `<input type="color" value="${color}" class="cat-color-input"> <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</span>`;
+        div.querySelector('input').dataset.label = label; container.appendChild(div);
+    }
+    window.togglePanel = function(header) { header.parentElement.classList.toggle('closed'); };
+    
+    // --- 属性パネル制御 ---
+    function showAttributePanel(feature) {
+        selectedFeatureForPanel = feature; const props = feature.getProperties();
+        document.getElementById('attr-layer-name').textContent = `(${layers.find(l=>l.id===activeLayerId)?.name || ""})`;
+        let html = `<table class="attr-table">`; const sortedKeys = Object.keys(props).sort();
+        sortedKeys.forEach(k => { if(k!=='geometry' && k!=='style') html += `<tr><th>${k}</th><td><input type="text" id="panel-edit-${k}" value="${props[k]!=null?props[k]:""}"></td></tr>`; });
+        html += `</table>`;
+        document.getElementById('attr-content').innerHTML = html; 
+        document.getElementById('attribute-panel').classList.add('open');
+    }
+    
+    window.closeAttributePanel = () => { 
+        const panel = document.getElementById('attribute-panel');
+        panel.classList.remove('open'); 
+        panel.classList.remove('expanded'); // 閉じる時に拡張状態もリセット
+        document.getElementById('panel-expand-icon').className = 'fas fa-expand';
+        
+        selectedFeatureForPanel = null; 
+        selectInteraction.getFeatures().clear(); 
+    };
+    
+    // パネル展開/縮小トグル
+    window.toggleAttributePanelSize = function() {
+        const panel = document.getElementById('attribute-panel');
+        const icon = document.getElementById('panel-expand-icon');
+        panel.classList.toggle('expanded');
+        if (panel.classList.contains('expanded')) {
+            icon.className = 'fas fa-compress';
+        } else {
+            icon.className = 'fas fa-expand';
+        }
+    };
+
+    window.saveAttributes = function() {
+        if(!selectedFeatureForPanel) return; if(!confirm("属性を更新しますか？")) return;
+        const props = selectedFeatureForPanel.getProperties(); const inputs = document.getElementById('attr-content').getElementsByTagName('input');
+        for(let i=0; i<inputs.length; i++) { props[inputs[i].id.replace('panel-edit-', '')] = inputs[i].value; }
+        selectedFeatureForPanel.setProperties(props); alert("更新しました"); closeAttributePanel();
+    };
+
+    // 不足していた関数を復元
+    window.updateAttributeList = function() {
+        const select = document.getElementById('filter-attr'); 
+        select.innerHTML = '<option value="">(属性を選択)</option>';
+        
+        if(!activeLayerId) return;
+        
+        const layer = layers.find(l => l.id === activeLayerId);
+        if (!layer || layer.type === 'raster') return; // ラスタは無視
+
+        const features = layer.layerObj.getSource().getFeatures();
+        if(features.length === 0) return;
+        
+        // 最初の地物のプロパティを取得してリスト化
+        const props = features[0].getProperties();
+        Object.keys(props).forEach(k => { 
+            if(k !== 'geometry' && k !== 'style') {
+                select.appendChild(new Option(k, k)); 
+            }
+        });
+        
+        // スタイル設定用のプルダウンも更新
+        const styleSelect = document.getElementById('style-attr');
+        if(styleSelect) {
+            const currentVal = styleSelect.value;
+            styleSelect.innerHTML = '';
+            Object.keys(props).forEach(k => { 
+                if(k !== 'geometry' && k !== 'style') {
+                    styleSelect.appendChild(new Option(k, k)); 
+                }
+            });
+            if(currentVal) styleSelect.value = currentVal;
+        }
+    };
+
+    window.updateFilterCandidates = function() {
+        const attr = document.getElementById('filter-attr').value; const datalist = document.getElementById('filter-values'); datalist.innerHTML = "";
+        if(!activeLayerId || !attr) return;
+        const layer = layers.find(l => l.id === activeLayerId);
+        if(layer.type === 'raster') return;
+        const features = layer.layerObj.getSource().getFeatures(); const values = new Set();
+        for(let f of features) { const val = f.getProperties()[attr]; if(val != null && val !== "") values.add(String(val)); if(values.size > 100) break; }
+        Array.from(values).sort().forEach(val => datalist.appendChild(new Option(val, val)));
+    };
+    window.applyFilter = function(createLayer) {
+        if(!activeLayerId) { alert("レイヤーを選択してください"); return; }
+        
+        const layer = layers.find(l => l.id === activeLayerId);
+        // ▼ 追加: 非表示レイヤーガード
+        if (!layer.layerObj.getVisible()) {
+            alert(`レイヤー「${layer.name}」は非表示です。\nチェックボックスをONにして表示してください。`);
+            return;
+        }
+        // ▲
+        
+        const attr = document.getElementById('filter-attr').value; const op = document.getElementById('filter-op').value; const valStr = document.getElementById('filter-val').value; if(!attr || valStr==="") return;
+        
+        if(layer.type === 'raster') { alert("画像レイヤーはフィルタできません"); return; }
+        let matched = [];
+        layer.layerObj.getSource().getFeatures().forEach(f => {
+            const raw = f.getProperties()[attr]; let vf = raw, vi = valStr; if(!isNaN(vf) && !isNaN(vi)) { vf=parseFloat(vf); vi=parseFloat(vi); }
+            let m = false; if(op==='eq') m = String(vf)==String(vi); else if(op==='contains') m = String(vf).indexOf(String(vi))>-1; else if(op==='gt') m = vf > vi; else if(op==='lt') m = vf < vi;
+            if(m) matched.push(f);
+        });
+        if(matched.length === 0) { alert("該当なし"); return; }
+        if(createLayer) { const clones = matched.map(f => { const c = f.clone(); c.setStyle(null); return c; }); addNewLayer(`${layer.name}_抽出`, clones); } 
+        else { selectInteraction.getFeatures().clear(); matched.forEach(f => selectInteraction.getFeatures().push(f)); updateStatus(`${matched.length}件選択`); }
+    };
+    window.mergeVisibleLayers = function() {
+        const visible = layers.filter(l => l.layerObj.getVisible() && l.type === 'vector'); if(visible.length < 2) return;
+        let feats = []; visible.forEach(l => { l.layerObj.getSource().getFeatures().forEach(f => { const c = f.clone(); const p = c.getProperties(); p['SOURCE'] = l.name; c.setProperties(p); feats.push(c); }); });
+        addNewLayer(`結合_${new Date().getHours()}${new Date().getMinutes()}`, feats);
+    };
+
+    // --- QRコード分割ロジック ---
+    window.generateQR = function() {
+        // 1. 選択状態の確認
+        const selectedFeatures = selectInteraction.getFeatures().getArray();
+        let features = [];
+        let mode = "";
+
+        if (selectedFeatures.length > 0) {
+            features = selectedFeatures; mode = "selected";
+        } else {
+            if (!activeLayerId) { alert("レイヤーを選択してください"); return; }
+            const layer = layers.find(l => l.id === activeLayerId);
+            
+            // ▼ 追加: 非表示レイヤーガード
+            if (!layer.layerObj.getVisible()) {
+                alert(`レイヤー「${layer.name}」は非表示です。\n同期するには表示状態にしてください。`);
+                return;
+            }
+            // ▲
+
+            if (layer.type === 'raster') { alert("画像レイヤーはQR化できません"); return; }
+            const extent = map.getView().calculateExtent(map.getSize());
+            features = layer.layerObj.getSource().getFeaturesInExtent(extent);
+            mode = "extent";
+        }
+
+        if (features.length === 0) { alert("QRコード化する地物がありません。"); return; }
+        
+        const geojsonObj = new ol.format.GeoJSON().writeFeaturesObject(features, { 
+            dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857', decimals: 5 
+        });
+        
+        const compressed = LZString.compressToBase64(JSON.stringify(geojsonObj));
+        
+        // QRコード容量制限
+        const CHUNK_LEN = 600; 
+        
+        const total = Math.ceil(compressed.length / CHUNK_LEN);
+
+        let confirmMsg = "";
+        if (mode === "selected") confirmMsg = `選択中の地物 (${features.length}件) をQRコード化します。\n合計 ${total} 枚になります。`;
+        else confirmMsg = `表示範囲の地物 (${features.length}件) をQRコード化します。\n合計 ${total} 枚になります。`;
+
+        if (total > 3 && !confirm(confirmMsg + "\n\n枚数が多いです。ファイルを送る方法を推奨しますが、続けますか？")) return;
+        
+        qrChunks = []; qrCurrentIndex = 0;
+
+        if (compressed.length <= CHUNK_LEN) {
+            qrChunks.push(compressed);
+        } else {
+            for (let i = 0; i < total; i++) {
+                const chunk = compressed.substr(i * CHUNK_LEN, CHUNK_LEN);
+                qrChunks.push(`FGS:${i+1}/${total}:${chunk}`);
+            }
+        }
+        
+        showQR(0);
+        document.getElementById('qr-modal-overlay').style.display = 'flex';
+    };
+
+    // 分割QR表示
+    function showQR(index) {
+        qrCurrentIndex = index;
+        const div = document.getElementById('qrcode');
+        div.innerHTML = "";
+        const data = qrChunks[index];
+        new QRCode(div, { text: data, width: 256, height: 256, correctLevel : QRCode.CorrectLevel.L });
+        
+        const nav = document.getElementById('qr-nav');
+        if (qrChunks.length > 1) {
+            nav.style.display = 'flex';
+            document.getElementById('qr-counter').textContent = `${index + 1} / ${qrChunks.length}`;
+            document.getElementById('btn-qr-prev').disabled = (index === 0);
+            document.getElementById('btn-qr-next').disabled = (index === qrChunks.length - 1);
+        } else { nav.style.display = 'none'; }
+    }
+
+    window.navigateQR = function(direction) {
+        const nextIndex = qrCurrentIndex + direction;
+        if (nextIndex >= 0 && nextIndex < qrChunks.length) showQR(nextIndex);
+    };
+
+    window.closeQRModal = (e) => { if (!e || e.target.id === 'qr-modal-overlay') document.getElementById('qr-modal-overlay').style.display = 'none'; };
+
+</script>
+</body>
+</html>
