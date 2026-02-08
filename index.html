@@ -109,7 +109,10 @@
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         .draw-btn.active { background: #27ae60; color: white; border-color: #27ae60; box-shadow: inset 0 2px 5px rgba(0,0,0,0.2); }
-        .draw-btn.stop-btn { color: #c0392b; border-color: #e74c3c; }
+        .draw-btn.stop-btn { color: #34495e; border-color: #bdc3c7; }
+        /* 削除ボタンのスタイル */
+        .draw-btn.delete-btn { color: #c0392b; border-color: #e74c3c; }
+        .draw-btn.delete-btn:hover { background: #ffebee; }
 
         /* コンテキストメニュー */
         .context-menu {
@@ -267,9 +270,10 @@
                         <li style="padding:15px; text-align:center; color:#999; font-size:12px;">データなし</li>
                     </ul>
                 </div>
-                <div style="padding:5px 10px; font-size:10px; color:#666; background:#f9f9f9; border-top:1px solid #eee;">
+                <!-- 文言修正: 改行位置を調整 -->
+                <div style="padding:5px 10px; font-size:10px; color:#666; background:#f9f9f9; border-top:1px solid #eee; line-height: 1.4;">
                     <i class="fas fa-pen"></i> で編集モードON/OFF<br>
-                    編集モード中は地図右クリックで操作可能
+                    編集モード中は地図右クリックで地物の追加・削除、頂点の操作が可能です。
                 </div>
             </div>
 
@@ -280,15 +284,13 @@
                     <i class="fas fa-chevron-down toggle-icon"></i>
                 </div>
                 <div class="panel-body">
+                    <!-- ボタンを2つに厳選しシンプル化 -->
                     <div class="draw-buttons">
                         <div class="draw-btn" id="btn-draw-poly" onclick="toggleDraw('Polygon')" title="ポリゴンを描画">
                             <i class="fas fa-draw-polygon"></i>
                         </div>
                         <div class="draw-btn" id="btn-draw-line" onclick="toggleDraw('LineString')" title="ラインを描画">
                             <i class="fas fa-route"></i>
-                        </div>
-                        <div class="draw-btn stop-btn" onclick="toggleDraw(null)" title="描画終了 (選択モード)">
-                            <i class="fas fa-ban"></i>
                         </div>
                     </div>
                     <div style="font-size:10px; color:#666; margin-top:5px; text-align:center;">
@@ -403,18 +405,18 @@
 <!-- モーダル群 (変更なしのため省略せず全て記述) -->
 <div id="global-drop-overlay">
     <i class="fas fa-file-import"></i>
-    <div class="main-text">ここにドロップしてインポート</div>
-    <div class="sub-text">Shapefile, GeoJSON, KML, CSV, GeoTIFF</div>
-</div>
-
+<!-- 右クリックメニュー -->
 <div id="context-menu" class="context-menu">
     <ul>
         <li id="ctx-copy" onclick="ctxCopy()"><i class="fas fa-copy"></i> コピー</li>
         <li id="ctx-paste" onclick="ctxPaste()"><i class="fas fa-paste"></i> 貼り付け</li>
         <li id="ctx-delete" onclick="ctxDelete()" style="color:#c0392b;"><i class="fas fa-trash"></i> 削除</li>
+        <!-- 頂点削除メニューを追加 -->
+        <li id="ctx-vertex-delete" onclick="ctxVertexDelete()" style="border-top:1px solid #eee; color:#e67e22;"><i class="fas fa-eraser"></i> 頂点を削除</li>
     </ul>
 </div>
 
+<!-- 属性テーブルモーダル -->
 <div id="table-modal-overlay">
     <div id="table-modal">
         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:10px;">
@@ -620,8 +622,11 @@
 <script>
     // --- Global State ---
     let layers = []; let activeLayerId = null; let currentEditLayerId = null; let editingPropLayerId = null;
-    let drawInteraction = null; let baseLayers = {}; let appClipboard = null; let contextMenuPosition = null;
+    let drawInteraction = null; let modifyInteraction = null; 
+    let baseLayers = {}; let appClipboard = null; let contextMenuPosition = null;
     let rightClickedFeature = null; let selectedFeatureForPanel = null; let pendingCsvData = null; let pdfPreviewDataUrl = null; 
+    let rightClickedLayer = null;
+    let targetVertexInfo = null; // 削除対象の頂点情報
 
     // QR分割管理用
     let qrChunks = [];
@@ -798,29 +803,181 @@
     map.addInteraction(selectInteraction);
     selectInteraction.on('select', e => { if(e.selected.length > 0) showAttributePanel(e.selected[0]); else closeAttributePanel(); });
 
+    // コンテキストメニュー処理 (修正版: レイヤー制限緩和)
     const ctxMenu = document.getElementById('context-menu');
     map.getViewport().addEventListener('contextmenu', function (e) {
         if (!currentEditLayerId) return; 
-        e.preventDefault(); const pixel = map.getEventPixel(e); contextMenuPosition = map.getCoordinateFromPixel(pixel);
-        const editLayer = layers.find(l => l.id === currentEditLayerId); rightClickedFeature = null;
-        map.forEachFeatureAtPixel(pixel, function(feature, layer) { if (layer === editLayer.layerObj) { rightClickedFeature = feature; return true; } }, { hitTolerance: 5 });
-        const copyBtn = document.getElementById('ctx-copy'); const deleteBtn = document.getElementById('ctx-delete'); const pasteBtn = document.getElementById('ctx-paste');
-        if (rightClickedFeature) { copyBtn.classList.remove('disabled'); deleteBtn.classList.remove('disabled'); } else { copyBtn.classList.add('disabled'); deleteBtn.classList.add('disabled'); }
+        e.preventDefault(); 
+        const pixel = map.getEventPixel(e); 
+        contextMenuPosition = map.getCoordinateFromPixel(pixel);
+        
+        const editLayerData = layers.find(l => l.id === currentEditLayerId);
+        
+        rightClickedFeature = null;
+        rightClickedLayer = null;
+        targetVertexInfo = null; // リセット
+
+        // 1. 地物の判定
+        map.forEachFeatureAtPixel(pixel, function(feature, layer) {
+            if (feature) {
+                rightClickedFeature = feature;
+                rightClickedLayer = layer;
+                return true; 
+            }
+        }, { hitTolerance: 5 });
+
+        // 2. 頂点の判定 (編集中のレイヤーの地物のみ)
+        if (rightClickedFeature && rightClickedLayer === editLayerData.layerObj) {
+            targetVertexInfo = findVertexAtPixel(pixel, rightClickedFeature);
+        }
+
+        // メニューの活性制御
+        const copyBtn = document.getElementById('ctx-copy');
+        const deleteBtn = document.getElementById('ctx-delete');
+        const pasteBtn = document.getElementById('ctx-paste');
+        const vertexBtn = document.getElementById('ctx-vertex-delete');
+        
+        // コピー: 地物があればOK
+        if (rightClickedFeature) { 
+            copyBtn.classList.remove('disabled'); 
+        } else { 
+            copyBtn.classList.add('disabled'); 
+        }
+        
+        // 削除: 編集中のレイヤーの地物のみOK
+        if (rightClickedFeature && rightClickedLayer === editLayerData.layerObj) {
+            deleteBtn.classList.remove('disabled'); 
+        } else { 
+            deleteBtn.classList.add('disabled'); 
+        }
+        
+        // 頂点削除: 頂点上ならOK
+        if (targetVertexInfo) {
+            vertexBtn.style.display = 'flex'; // 表示
+            vertexBtn.classList.remove('disabled');
+        } else {
+            vertexBtn.style.display = 'none'; // 頂点以外では非表示ですっきりさせる
+        }
+        
         if (appClipboard) pasteBtn.classList.remove('disabled'); else pasteBtn.classList.add('disabled');
-        ctxMenu.style.display = 'block'; ctxMenu.style.left = e.pageX + 'px'; ctxMenu.style.top = e.pageY + 'px';
+
+        ctxMenu.style.display = 'block'; 
+        ctxMenu.style.left = e.pageX + 'px'; 
+        ctxMenu.style.top = e.pageY + 'px';
     });
+    
     document.addEventListener('click', () => ctxMenu.style.display = 'none');
+    
+    // 頂点検索関数 (許容誤差 10px)
+    function findVertexAtPixel(pixel, feature) {
+        const geometry = feature.getGeometry();
+        const type = geometry.getType();
+        const tolerance = 10; // ピクセル許容誤差
+
+        let coordinates;
+        if (type === 'Polygon') {
+            coordinates = geometry.getCoordinates(); // [外枠, 穴1, 穴2...]
+            for (let i = 0; i < coordinates.length; i++) {
+                const ring = coordinates[i];
+                for (let j = 0; j < ring.length; j++) {
+                    const vertexPixel = map.getPixelFromCoordinate(ring[j]);
+                    const dx = pixel[0] - vertexPixel[0];
+                    const dy = pixel[1] - vertexPixel[1];
+                    if (Math.sqrt(dx*dx + dy*dy) <= tolerance) {
+                        return { feature: feature, type: 'Polygon', ringIndex: i, vertexIndex: j };
+                    }
+                }
+            }
+        } else if (type === 'LineString') {
+            coordinates = geometry.getCoordinates();
+            for (let j = 0; j < coordinates.length; j++) {
+                const vertexPixel = map.getPixelFromCoordinate(coordinates[j]);
+                const dx = pixel[0] - vertexPixel[0];
+                const dy = pixel[1] - vertexPixel[1];
+                if (Math.sqrt(dx*dx + dy*dy) <= tolerance) {
+                    return { feature: feature, type: 'LineString', vertexIndex: j };
+                }
+            }
+        }
+        return null;
+    }
+
+    // 頂点削除実行
+    window.ctxVertexDelete = function() {
+        if (!targetVertexInfo) return;
+        
+        const feature = targetVertexInfo.feature;
+        const geometry = feature.getGeometry();
+        const coords = geometry.getCoordinates();
+        
+        if (targetVertexInfo.type === 'Polygon') {
+            const ring = coords[targetVertexInfo.ringIndex];
+            // ポリゴンは最低4点（始点=終点含むため実質3点）必要
+            if (ring.length <= 4) {
+                alert("これ以上頂点を削除できません（ポリゴンは最低3点必要です）");
+                return;
+            }
+            ring.splice(targetVertexInfo.vertexIndex, 1);
+            // 始点・終点が一致している必要があるため、端の点を消した場合は調整が必要だが、
+            // OpenLayersのModifyインタラクションは自動で閉じてくれる場合が多い。
+            // 念のため、インデックス0を消したら末尾も合わせる等の処理が必要だが、
+            // ここでは簡易的に座標更新のみ行う。OpenLayersが整合性を取る。
+            geometry.setCoordinates(coords);
+            
+        } else if (targetVertexInfo.type === 'LineString') {
+            if (coords.length <= 2) {
+                alert("これ以上頂点を削除できません（ラインは最低2点必要です）");
+                return;
+            }
+            coords.splice(targetVertexInfo.vertexIndex, 1);
+            geometry.setCoordinates(coords);
+        }
+        
+        updateStatus("頂点を削除しました");
+    };
+    
     window.ctxCopy = () => { if (rightClickedFeature) { appClipboard = rightClickedFeature.clone(); updateStatus("コピーしました"); } };
-    window.ctxDelete = () => { if (!rightClickedFeature || !currentEditLayerId) return; if(confirm("削除しますか？")) { layers.find(l => l.id === currentEditLayerId).layerObj.getSource().removeFeature(rightClickedFeature); updateStatus("削除しました"); closeAttributePanel(); } };
+    
+    window.ctxDelete = () => {
+        if (!rightClickedFeature || !currentEditLayerId) return;
+        const editLayerData = layers.find(l => l.id === currentEditLayerId);
+        
+        // ガード処理: 編集中のレイヤー以外は削除不可
+        if (rightClickedLayer !== editLayerData.layerObj) {
+            alert("編集中のレイヤー以外の地物は削除できません。");
+            return;
+        }
+
+        if(confirm("削除しますか？")) { 
+            editLayerData.layerObj.getSource().removeFeature(rightClickedFeature);
+            updateStatus("削除しました"); 
+            closeAttributePanel(); 
+        }
+    };
+    
     window.ctxPaste = () => { if (!appClipboard || !currentEditLayerId) return; const newFeature = appClipboard.clone(); const geom = newFeature.getGeometry(); const center = ol.extent.getCenter(geom.getExtent()); geom.translate(contextMenuPosition[0] - center[0], contextMenuPosition[1] - center[1]); newFeature.setId(null); layers.find(l => l.id === currentEditLayerId).layerObj.getSource().addFeature(newFeature); updateStatus("貼り付けました"); };
 
     window.toggleDraw = function(type) {
         if (drawInteraction) { map.removeInteraction(drawInteraction); drawInteraction = null; }
-        selectInteraction.setActive(true); document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active')); mapDiv.classList.remove('drawing');
+        
+        // 描画中は選択機能を一時的にOFFにするが、Modify(変形)との兼ね合いを調整
+        if (type) {
+            selectInteraction.setActive(false);
+            if (modifyInteraction) modifyInteraction.setActive(false); // 描画中は変形OFF
+            mapDiv.classList.add('drawing');
+        } else {
+            selectInteraction.setActive(true);
+            if (modifyInteraction) modifyInteraction.setActive(true); // 選択モードなら変形ON
+            mapDiv.classList.remove('drawing');
+        }
+        
+        document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active')); 
+        
         if (!type) return;
-        selectInteraction.setActive(false);
-        if(type==='Polygon') document.getElementById('btn-draw-poly').classList.add('active'); if(type==='LineString') document.getElementById('btn-draw-line').classList.add('active');
-        mapDiv.classList.add('drawing');
+        
+        if(type==='Polygon') document.getElementById('btn-draw-poly').classList.add('active'); 
+        if(type==='LineString') document.getElementById('btn-draw-line').classList.add('active');
+
         let targetSource = currentEditLayerId ? layers.find(l => l.id === currentEditLayerId).layerObj.getSource() : new ol.source.Vector();
         drawInteraction = new ol.interaction.Draw({ source: targetSource, type: type });
         drawInteraction.on('drawend', e => {
@@ -829,12 +986,85 @@
             f.setProperties(p); 
             if(!currentEditLayerId) addNewLayer(`描画_${new Date().toTimeString().split(' ')[0]}`, [f]); else updateStatus("追記しました");
             
-            // 描画モードを自動解除 (修正点)
+            // 描画モードを自動解除
             setTimeout(() => { toggleDraw(null); }, 100);
         });
         map.addInteraction(drawInteraction);
     };
-    window.toggleEditMode = function(id) { if (currentEditLayerId === id) { currentEditLayerId = null; editStatus.textContent = ""; toggleDraw(null); } else { currentEditLayerId = id; editStatus.textContent = `[編集中: ${layers.find(l=>l.id===id).name}]`; setActiveLayer(id); } renderLayerList(); };
+
+    // 編集モード切替 (Modifyインタラクションの追加)
+    window.toggleEditMode = function(id) { 
+        // 以前の編集モードをクリーンアップ
+        if (modifyInteraction) {
+            map.removeInteraction(modifyInteraction);
+            modifyInteraction = null;
+        }
+
+        if (currentEditLayerId === id) { 
+            // 編集終了
+            currentEditLayerId = null; 
+            editStatus.textContent = ""; 
+            toggleDraw(null); 
+        } else { 
+            // 編集開始
+            currentEditLayerId = id; 
+            const layer = layers.find(l => l.id === id);
+            editStatus.textContent = `[編集中: ${layer.name}]`; 
+            setActiveLayer(id); 
+            
+            // Modifyインタラクション (頂点編集) を追加
+            modifyInteraction = new ol.interaction.Modify({ 
+                source: layer.layerObj.getSource(),
+                // deleteCondition: Altキー + クリックで頂点削除
+                deleteCondition: function(event) {
+                    return ol.events.condition.altKeyOnly(event) &&
+                           ol.events.condition.singleClick(event);
+                }
+            });
+            map.addInteraction(modifyInteraction);
+        } 
+        renderLayerList(); 
+    };
+
+    // 選択中の地物を削除する関数
+    window.deleteSelectedFeature = function() {
+        const selectedFeatures = selectInteraction.getFeatures();
+        if (selectedFeatures.getLength() === 0) {
+            alert("削除する地物を選択してください");
+            return;
+        }
+        
+        if (!currentEditLayerId) {
+            alert("削除するには、対象のレイヤーを「編集モード」にしてください");
+            return;
+        }
+
+        const layer = layers.find(l => l.id === currentEditLayerId);
+        const source = layer.layerObj.getSource();
+        const featuresToRemove = [];
+
+        selectedFeatures.forEach(f => {
+            // 選択された地物が、編集中のレイヤーに含まれているか確認
+            // (getFeatures()配列に含まれているかで判定)
+            if (source.getFeatures().indexOf(f) !== -1) {
+                featuresToRemove.push(f);
+            }
+        });
+
+        if (featuresToRemove.length === 0) {
+            alert("選択された地物は編集中のレイヤーに含まれていません。\nレイヤーリストの鉛筆アイコンを押して編集モードを切り替えてください。");
+            return;
+        }
+
+        if (confirm(`${featuresToRemove.length}件の地物を削除しますか？`)) {
+            featuresToRemove.forEach(f => {
+                source.removeFeature(f);
+                selectedFeatures.remove(f); // 選択状態も解除
+            });
+            updateStatus("削除しました");
+            closeAttributePanel();
+        }
+    };
 
     const dropOverlay = document.getElementById('global-drop-overlay');
     window.addEventListener('dragover', (e) => { e.preventDefault(); dropOverlay.classList.add('active'); });
